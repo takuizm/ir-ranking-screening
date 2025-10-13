@@ -1,0 +1,44 @@
+{
+  "name": "corporate-site-survey",
+  "version": "5.0.0",
+  "description": "企業IR調査自動化スクリプト - Basic: 2項目版（軽量・高速）、Full: 8項目版（詳細調査）",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js --mode compact",
+    "survey:full": "node src/index.js --mode full",
+    "survey:primary": "node src/index.js --mode primary",
+    "survey:secondary": "node src/index.js --mode secondary",
+    "survey:sample": "node src/index.js --mode full --file urls_sample.json",
+    "lint": "eslint \"src/**/*.js\" --max-warnings=0",
+    "lint:fix": "eslint \"src/**/*.js\" --fix",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "smoke": "node src/index.js --mode compact --file urls_sample.txt --dry-run"
+  },
+  "dependencies": {
+    "puppeteer": "^21.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "prettier": "^3.2.5",
+    "vitest": "^1.2.2"
+  },
+  "keywords": [
+    "web scraping",
+    "corporate site survey",
+    "automation",
+    "puppeteer"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

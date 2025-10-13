@@ -1,0 +1,29 @@
+{
+  "urls": [
+    {
+      "code": "8001",
+      "name": "Sony",
+      "url": "https://www.sony.co.jp/"
+    },
+    {
+      "code": "7203",
+      "name": "Toyota",
+      "url": "https://www.toyota.co.jp/"
+    },
+    {
+      "code": "7267",
+      "name": "Honda",
+      "url": "https://www.honda.co.jp/"
+    },
+    {
+      "code": "6752",
+      "name": "Panasonic",
+      "url": "https://www.panasonic.com/jp/"
+    },
+    {
+      "code": "9434",
+      "name": "Softbank",
+      "url": "https://www.softbank.jp/"
+    }
+  ]
+}
