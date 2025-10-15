@@ -200,6 +200,18 @@ Error: Failed to download Chromium
 - `config/keywords.json` の `search.triggerTexts` や `search.iconSelectors` に対象サイト固有の値を追加
 - `--mode compact` で軽量チェックのみ行い、対象サイトの挙動を確認
 
+### 途中でエラーが発生し CSV が生成されなかった
+
+`logs/` には常に `YYYYMMDDHHMMSS_ir-survey.log` が追記されます。調査途中でプロセスが落ちた場合は、このログを解析して途中までの結果を CSV として復元できます。
+
+```bash
+node scripts/log-to-csv.js logs/20251015T012818_ir-survey.log output/20251015T012818_from_log.csv
+```
+
+- 第1引数に対象ログ、必要に応じて第2引数で出力CSVパスを指定します（省略時は `output/` 配下に自動生成）。
+- ログに出力される `ヒットURL(社長メッセージ): ...` のような行を利用し、備考とともに復元します。
+- 本来の調査が完了できなかった場合でも、進捗分の結果を引き継げます。
+
 ---
 
 ## 付録
