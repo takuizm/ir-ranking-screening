@@ -2,7 +2,6 @@
   "description": "企業IR調査スクリプト v5.0 キーワード設定ファイル",
   "version": "1.0.0",
   "lastUpdated": "2025-10-08",
-
   "search": {
     "description": "サイト内検索機能の検出用セレクタ",
     "selectors": [
@@ -230,7 +229,15 @@
       ".search-panel input",
       ".search-dropdown input"
     ],
-    "triggerTexts": ["検索", "search", "magnify", "find", "query", "lookup", "seek"],
+    "triggerTexts": [
+      "検索",
+      "search",
+      "magnify",
+      "find",
+      "query",
+      "lookup",
+      "seek"
+    ],
     "specificPatterns": [
       "li.btn_search",
       ".search-toggle",
@@ -247,7 +254,14 @@
       "[title*=\"検索\"]",
       "[title*=\"search\"]"
     ],
-    "hiddenIndicators": ["search", "検索", "magnify", "find", "query", "lookup"],
+    "hiddenIndicators": [
+      "search",
+      "検索",
+      "magnify",
+      "find",
+      "query",
+      "lookup"
+    ],
     "excludeSelectors": [
       "img[src*=\"sharedsearch\"]",
       "img[src*=\"sharedresearch\"]",
@@ -286,7 +300,6 @@
       ".search-dropdown button"
     ]
   },
-
   "english": {
     "description": "英語版サイトの検出用パターン",
     "urlPatterns": [
@@ -303,10 +316,23 @@
       "a[href$=\"/en\"]",
       "a[href$=\"/en.html\"]"
     ],
-    "textPatterns": ["EN", "ENGLISH", "GLOBAL", "EN-US", "ENG", "ENGLISH SITE", "ENGLISH VERSION"],
-    "excludeDomains": ["cookiebot.com", "google.com", "facebook.com", "twitter.com", "linkedin.com"]
+    "textPatterns": [
+      "EN",
+      "ENGLISH",
+      "GLOBAL",
+      "EN-US",
+      "ENG",
+      "ENGLISH SITE",
+      "ENGLISH VERSION"
+    ],
+    "excludeDomains": [
+      "cookiebot.com",
+      "google.com",
+      "facebook.com",
+      "twitter.com",
+      "linkedin.com"
+    ]
   },
-
   "topMessage": {
     "description": "社長メッセージの検出用キーワード",
     "textPatterns": [
@@ -316,24 +342,55 @@
       "代表挨拶",
       "社長挨拶"
     ],
-    "urlPatterns": ["message", "greeting", "topmessage"],
-    "contentKeywords": ["社長", "代表", "経営", "株主の皆様", "投資家の皆様"],
+    "urlPatterns": [
+      "message",
+      "greeting",
+      "topmessage"
+    ],
+    "contentKeywords": [
+      "社長",
+      "代表",
+      "経営",
+      "株主の皆様",
+      "投資家の皆様"
+    ],
     "minContentLength": 500
   },
-
   "officer": {
     "description": "役員（社長の経歴）の検出用キーワード",
-    "textPatterns": ["役員", "経営陣", "役員紹介", "経営者", "役員一覧"],
-    "urlPatterns": ["officer", "board", "executive"]
+    "textPatterns": [
+      "役員",
+      "経営陣",
+      "役員紹介",
+      "経営者",
+      "役員一覧"
+    ],
+    "urlPatterns": [
+      "officer",
+      "board",
+      "executive"
+    ]
   },
-
   "profile": {
     "description": "経歴情報の検出用キーワード",
-    "careerKeywords": ["経歴", "略歴", "学歴", "職歴"],
-    "yearPatterns": ["昭和", "平成", "令和", "19\\d\\d年", "20\\d\\d年"],
-    "ceoKeywords": ["代表取締役", "社長"]
+    "careerKeywords": [
+      "経歴",
+      "略歴",
+      "学歴",
+      "職歴"
+    ],
+    "yearPatterns": [
+      "昭和",
+      "平成",
+      "令和",
+      "19\\d\\d年",
+      "20\\d\\d年"
+    ],
+    "ceoKeywords": [
+      "代表取締役",
+      "社長"
+    ]
   },
-
   "integratedReport": {
     "description": "統合報告書の検出用キーワード",
     "textPatterns": [
@@ -344,35 +401,113 @@
       "Integrated Report",
       "IR資料室"
     ],
-    "urlPatterns": ["library", "integrated"],
-    "reportKeywords": ["統合報告書", "Integrated Report", "アニュアルレポート", "Annual Report"],
-    "pdfIndicators": [".pdf", "PDF"]
+    "urlPatterns": [
+      "library",
+      "integrated"
+    ],
+    "reportKeywords": [
+      "統合報告書",
+      "Integrated Report",
+      "アニュアルレポート",
+      "Annual Report"
+    ],
+    "pdfIndicators": [
+      ".pdf",
+      "PDF"
+    ]
   },
-
   "financial": {
     "description": "財務ハイライトの検出用キーワード",
-    "textPatterns": ["財務ハイライト", "業績ハイライト", "財務・業績", "財務情報", "業績情報"],
-    "urlPatterns": ["highlight", "financial", "performance"]
+    "textPatterns": [
+      "財務ハイライト",
+      "業績ハイライト",
+      "財務・業績",
+      "財務情報",
+      "業績情報"
+    ],
+    "urlPatterns": [
+      "highlight",
+      "financial",
+      "performance"
+    ]
   },
-
   "graph": {
     "description": "グラフ要素の検出用",
-    "selectors": ["canvas", "svg"],
-    "textPatterns": ["売上高.*百万円", "営業利益.*百万円", "当期純利益.*百万円"],
-    "imageAltKeywords": ["グラフ", "推移", "chart"]
+    "selectors": [
+      "canvas",
+      "svg"
+    ],
+    "textPatterns": [
+      "売上高.*百万円",
+      "営業利益.*百万円",
+      "当期純利益.*百万円"
+    ],
+    "imageAltKeywords": [
+      "グラフ",
+      "推移",
+      "chart"
+    ]
   },
-
   "stock": {
     "description": "株主還元・優待の検出用キーワード",
-    "textPatterns": ["株主還元", "株主優待", "配当", "株式情報", "株主・株式", "株主情報"],
-    "urlPatterns": ["stock", "shareholder", "yutai", "dividend", "benefit"],
-    "contentKeywords": ["株主還元", "配当", "株主優待", "Dividend", "還元方針", "優待制度"],
-    "excludeUrls": ["yahoo"]
+    "textPatterns": [
+      "株主還元",
+      "株主優待",
+      "配当",
+      "株式情報",
+      "株主・株式",
+      "株主情報"
+    ],
+    "urlPatterns": [
+      "stock",
+      "shareholder",
+      "yutai",
+      "dividend",
+      "benefit"
+    ],
+    "contentKeywords": [
+      "株主還元",
+      "配当",
+      "株主優待",
+      "Dividend",
+      "還元方針",
+      "優待制度"
+    ],
+    "excludeUrls": [
+      "yahoo"
+    ],
+    "primaryContentKeywords": [
+      "株主還元",
+      "株主優待",
+      "還元方針",
+      "優待制度",
+      "配当政策",
+      "配当方針",
+      "株主還元方針",
+      "dividend policy",
+      "dividend policies",
+      "shareholder return",
+      "shareholder returns",
+      "shareholder benefit",
+      "shareholder benefits"
+    ],
+    "contentMinimumLength": 20
   },
-
   "sustainability": {
     "description": "サステナビリティメニューの検出用キーワード",
-    "menuKeywords": ["サステナビリティ", "Sustainability", "ESG", "CSR", "SDGs"],
-    "selectors": ["header a", "nav a", ".global-nav a", ".header a", ".gnav a"]
+    "menuKeywords": [
+      "サステナビリティ",
+      "Sustainability",
+      "ESG",
+      "CSR",
+      "SDGs"
+    ],
+    "selectors": [
+      "header a",
+      "nav a",
+      ".global-nav a",
+      ".header a",
+      ".gnav a"
+    ]
   }
 }

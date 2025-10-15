@@ -41,6 +41,12 @@ const path = require('path');
 const util = require('util');
 const { loadUrls: loadUrlEntries } = require('./lib/url-loader');
 const { loadKeywords } = require('./config/keywords');
+const {
+  evaluateFinancialText,
+  evaluateShareholderContent,
+  evaluateTopMessage,
+  selectIntegratedReportLink,
+} = require('./lib/spec-validators');
 
 const INPUT_DIR = path.join(process.cwd(), 'input');
 const OUTPUT_DIR = path.join(process.cwd(), 'output');
@@ -57,9 +63,13 @@ ensureDirectoryExists(OUTPUT_DIR);
 ensureDirectoryExists(LOG_DIR);
 
 const runStartedAt = new Date();
+const previousYearThreshold = new Date(runStartedAt.getFullYear() - 1, 0, 1);
+const financialDataMinYear = Math.max(runStartedAt.getFullYear() - 1, 2000);
+const integratedReportMinYear = 2023;
 const logFilename = `${runStartedAt.toISOString().replace(/[-:]/g, '').split('.')[0]}_ir-survey.log`;
 const logFilePath = path.join(LOG_DIR, logFilename);
 const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+const DEFAULT_PROTOCOL_TIMEOUT = 45000;
 
 function writeLog(level, args) {
   const timestamp = new Date().toISOString();
@@ -263,8 +273,17 @@ async function checkLinkDestination(page, url, contentCheckFunction, options = {
         try {
           // 内容チェック関数を実行
           const checkFn = eval(`(${checkFnString})`);
-          const exists = checkFn(ctx || {});
-          return { exists: exists, is404: false, url: window.location.href };
+          const result = checkFn(ctx || {});
+          if (typeof result === 'object' && result !== null) {
+            const { exists, ...details } = result;
+            return {
+              exists: typeof exists === 'undefined' ? true : Boolean(exists),
+              is404: false,
+              url: window.location.href,
+              details,
+            };
+          }
+          return { exists: Boolean(result), is404: false, url: window.location.href };
         } catch (e) {
           return { exists: false, is404: false, url: window.location.href, error: e.message };
         }
@@ -278,6 +297,123 @@ async function checkLinkDestination(page, url, contentCheckFunction, options = {
     console.log(`    ⚠️ アクセスエラー: ${error.message}`);
     return { exists: false, is404: true, url: url };
   }
+}
+
+function formatDateForLog(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function setItemNote(item, message) {
+  if (!item) {
+    return;
+  }
+  item.note = message || '';
+}
+
+function logHitUrl(label, url) {
+  if (!url) {
+    return;
+  }
+  console.log(`    ヒットURL(${label}): ${url}`);
+}
+
+function createSurveyItem(overrides = {}) {
+  return {
+    value: 0,
+    hitUrl: '',
+    note: '',
+    detectedSelector: '',
+    detectedElementType: '',
+    ...overrides,
+  };
+}
+
+function createDefaultItems() {
+  return {
+    hasSearch: createSurveyItem(),
+    hasEnglish: createSurveyItem(),
+    hasTopMessage: createSurveyItem(),
+    hasProfile: createSurveyItem(),
+    hasIntegratedReport: createSurveyItem(),
+    hasFinancialGraph: createSurveyItem(),
+    hasShareholderBenefit: createSurveyItem(),
+    hasSustainabilityMenu: createSurveyItem(),
+  };
+}
+
+function computeSummary(allResults = []) {
+  return {
+    hasSearch: allResults.filter((r) => r.items.hasSearch.value === 1).length,
+    hasEnglish: allResults.filter((r) => r.items.hasEnglish.value === 1).length,
+    hasTopMessage: allResults.filter((r) => r.items.hasTopMessage.value === 1).length,
+    hasProfile: allResults.filter((r) => r.items.hasProfile.value === 1).length,
+    hasIntegratedReport: allResults.filter((r) => r.items.hasIntegratedReport.value === 1).length,
+    hasFinancialGraph: allResults.filter((r) => r.items.hasFinancialGraph.value === 1).length,
+    hasShareholderBenefit: allResults.filter((r) => r.items.hasShareholderBenefit.value === 1).length,
+    hasSustainabilityMenu: allResults.filter((r) => r.items.hasSustainabilityMenu.value === 1).length,
+  };
+}
+
+function logSummary(allResults, summary) {
+  const total = allResults.length || 1;
+  console.log('\n検出サマリー:');
+  console.log(
+    `  サイト内検索: ${summary.hasSearch}/${allResults.length} (${((summary.hasSearch / total) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `  英語版サイト: ${summary.hasEnglish}/${allResults.length} (${((summary.hasEnglish / total) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `  社長メッセージ: ${summary.hasTopMessage}/${allResults.length} (${((summary.hasTopMessage / total) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `  社長の経歴: ${summary.hasProfile}/${allResults.length} (${((summary.hasProfile / total) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `  統合報告書: ${summary.hasIntegratedReport}/${allResults.length} (${((summary.hasIntegratedReport / total) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `  財務グラフ: ${summary.hasFinancialGraph}/${allResults.length} (${((summary.hasFinancialGraph / total) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `  株主還元・優待: ${summary.hasShareholderBenefit}/${allResults.length} (${((summary.hasShareholderBenefit / total) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `  サステナビリティ: ${summary.hasSustainabilityMenu}/${allResults.length} (${((summary.hasSustainabilityMenu / total) * 100).toFixed(1)}%)`,
+  );
+  console.log('='.repeat(60));
+}
+
+function writeSurveyOutputs(options, allResults, urlEntries, encounteredError) {
+  ensureParentDirectory(options.output);
+
+  const csv =
+    options.outputStyle === 'compact'
+      ? generateCompactCsv(allResults, urlEntries)
+      : generateCsv(allResults);
+  fs.writeFileSync(options.output, csv, 'utf8');
+
+  console.log('\n' + '='.repeat(60));
+  console.log(encounteredError ? '調査完了（エラーあり）' : '調査完了');
+  console.log('='.repeat(60));
+  console.log(`出力ファイル: ${toDisplayPath(options.output)}`);
+  console.log(`調査件数: ${allResults.length}件`);
+
+  const summary = computeSummary(allResults);
+  logSummary(allResults, summary);
+
+  const errorCount = allResults.filter((r) => r.error).length;
+  if (errorCount > 0) {
+    console.log(`\n⚠️ エラー件数: ${errorCount}件`);
+  }
+
+  return summary;
 }
 
 /**
@@ -298,16 +434,7 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
   const results = {
     url: url,
     actualUrl: '',
-    items: {
-      hasSearch: { value: 0, hitUrl: '' },
-      hasEnglish: { value: 0, hitUrl: '' },
-      hasTopMessage: { value: 0, hitUrl: '' },
-      hasProfile: { value: 0, hitUrl: '' },
-      hasIntegratedReport: { value: 0, hitUrl: '' },
-      hasFinancialGraph: { value: 0, hitUrl: '' },
-      hasShareholderBenefit: { value: 0, hitUrl: '' },
-      hasSustainabilityMenu: { value: 0, hitUrl: '' },
-    },
+    items: createDefaultItems(),
     error: null,
     mode: mode, // 実行モードを記録
   };
@@ -690,17 +817,67 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
         }
 
         // 8. サステナビリティメニュー（キーワード設定使用）
-        const sustainabilityPatterns = kw.sustainability.menuKeywords;
-        const sustainabilitySelectors = kw.sustainability.selectors.join(', ');
-        const navLinks = Array.from(document.querySelectorAll(sustainabilitySelectors));
-        result.hasSustainability = navLinks.some((link) =>
-          sustainabilityPatterns.some((pattern) => link.textContent.includes(pattern)),
-        );
-        if (result.hasSustainability) {
-          const sustainLink = navLinks.find((link) =>
-            sustainabilityPatterns.some((pattern) => link.textContent.includes(pattern)),
+        const sustainabilityPatterns = kw.sustainability.menuKeywords || [];
+        const sustainabilitySelectorList = kw.sustainability.selectors || [];
+        const sustainabilitySelectors = sustainabilitySelectorList.join(', ');
+
+        const isVisible = (element) => {
+          if (!element) {
+            return false;
+          }
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          const opacity = parseFloat(style.opacity || '1');
+          if (!rect || !style) {
+            return false;
+          }
+          return (
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.visibility !== 'hidden' &&
+            style.display !== 'none' &&
+            opacity > 0
           );
-          result.sustainabilityUrl = sustainLink ? sustainLink.href : '';
+        };
+
+        const isTopLevelMenu = (element) => {
+          let depth = 0;
+          let current = element.parentElement;
+          while (current && current !== document.body) {
+            if (
+              current.matches('ul, ol, menu') ||
+              current.getAttribute('role') === 'menu' ||
+              current.getAttribute('role') === 'menubar'
+            ) {
+              depth += 1;
+            }
+            if (current.matches('nav, header')) {
+              break;
+            }
+            current = current.parentElement;
+          }
+          return depth <= 1;
+        };
+
+        let sustainabilityLink = null;
+        if (sustainabilitySelectors.trim() !== '') {
+          const navLinks = Array.from(document.querySelectorAll(sustainabilitySelectors));
+          sustainabilityLink = navLinks.find((link) => {
+            const text = (link.textContent || '').trim();
+            const matchesKeyword = sustainabilityPatterns.some((pattern) => text.includes(pattern));
+            if (!matchesKeyword) {
+              return false;
+            }
+            if (!isVisible(link)) {
+              return false;
+            }
+            return isTopLevelMenu(link);
+          });
+        }
+
+        result.hasSustainability = Boolean(sustainabilityLink);
+        if (sustainabilityLink) {
+          result.sustainabilityUrl = sustainabilityLink.href || '';
         }
 
         // リンク取得（キーワード設定使用）
@@ -752,11 +929,14 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
             const matchesText = kw.stock.textPatterns.some((p) => text.includes(p));
             const matchesUrl = kw.stock.urlPatterns.some((p) => href.includes(p));
             const notExcluded = kw.stock.excludeUrls.every((ex) => !href.includes(ex));
+            const hrefLower = href.toLowerCase();
+            const isPdf = hrefLower.includes('.pdf');
             if (
               (matchesText || matchesUrl) &&
               href.startsWith('http') &&
               href.includes(domain) &&
-              notExcluded
+              notExcluded &&
+              !isPdf
             ) {
               result.links.stock = href;
             }
@@ -787,6 +967,11 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
 
       if (autoDetect.hasSearchIcon) {
         console.log(`  ✓ サイト内検索: 検索アイコン検出 (${autoDetect.searchIconSelector})`);
+        const iconSelector =
+          autoDetect.searchIconSelector && autoDetect.searchIconSelector.trim().length > 0
+            ? `サイト内検索: 検索アイコン検出 (${autoDetect.searchIconSelector})`
+            : 'サイト内検索: 検索アイコン検出';
+        setItemNote(results.items.hasSearch, iconSelector);
 
         // 検索アイコンをクリックしてモーダル/ドロワーを開く
         if (autoDetect.searchIconSelector && autoDetect.searchIconSelector.trim() !== '') {
@@ -804,6 +989,11 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
             if (modalSearchInput) {
               console.log(`  ✓ モーダル内検索入力欄: 検出`);
               results.items.hasSearch.hitUrl = page.url();
+              setItemNote(
+                results.items.hasSearch,
+                'サイト内検索: 検索アイコン検出（モーダル内入力欄あり）',
+              );
+              logHitUrl('サイト内検索', results.items.hasSearch.hitUrl);
             } else {
               console.log(`  ⚠️ モーダル内検索入力欄: 未検出`);
             }
@@ -815,6 +1005,8 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
         }
       } else {
         console.log(`  ✓ サイト内検索: 検出`);
+        setItemNote(results.items.hasSearch, 'サイト内検索: 検出');
+        logHitUrl('サイト内検索', results.items.hasSearch.hitUrl || results.actualUrl);
       }
     } else {
       // 高度な検索機能検出を試行（検出ロジックの順序改善）
@@ -1017,6 +1209,11 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
         results.items.hasSearch.hitUrl = results.actualUrl;
         results.items.hasSearch.detectedSelector = `advanced-${advancedSearchResult.type}`;
         results.items.hasSearch.detectedElementType = advancedSearchResult.type;
+        setItemNote(
+          results.items.hasSearch,
+          `サイト内検索: 検出（高度検出: ${advancedSearchResult.type}）`,
+        );
+        logHitUrl('サイト内検索', results.items.hasSearch.hitUrl);
 
         // クリック可能要素が見つかった場合はクリックを試行
         if (
@@ -1154,6 +1351,8 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
                 if (isSearchResult) {
                   console.log(`  ✓ 検索機能: 動作確認済み`);
                   results.items.hasSearch.hitUrl = currentUrl;
+                  setItemNote(results.items.hasSearch, 'サイト内検索: 検出（動作確認済み）');
+                  logHitUrl('サイト内検索', results.items.hasSearch.hitUrl);
                 } else {
                   console.log(`  ⚠️ 検索結果: 不明`);
                 }
@@ -1169,6 +1368,9 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
         }
       } else {
         console.log(`  ✗ サイト内検索: 未検出`);
+        if (!results.items.hasSearch.note) {
+          setItemNote(results.items.hasSearch, 'サイト内検索: 未検出');
+        }
       }
     }
 
@@ -1177,8 +1379,11 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
       results.items.hasSustainabilityMenu.hitUrl =
         autoDetect.sustainabilityUrl || results.actualUrl;
       console.log(`  ✓ サステナビリティメニュー: 検出`);
+      setItemNote(results.items.hasSustainabilityMenu, 'サステナビリティメニュー: 検出');
+      logHitUrl('サステナビリティメニュー', results.items.hasSustainabilityMenu.hitUrl);
     } else {
       console.log(`  ✗ サステナビリティメニュー: 未検出`);
+      setItemNote(results.items.hasSustainabilityMenu, 'サステナビリティメニュー: 未検出');
     }
 
     // ステップ5.5: 英語版サイトの確認（実際に遷移）
@@ -1200,8 +1405,14 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
         results.items.hasEnglish.value = 1;
         results.items.hasEnglish.hitUrl = englishCheck.url;
         console.log(`  ✓ 英語版サイト: 有（${englishCheck.url}）`);
+        setItemNote(
+          results.items.hasEnglish,
+          `IR英語版サイト: 有（${englishCheck.url}）`,
+        );
+        logHitUrl('IR英語版サイト', englishCheck.url);
       } else {
         console.log(`  ✗ 英語版サイト: 404エラー`);
+        setItemNote(results.items.hasEnglish, 'IR英語版サイト: 404エラー');
       }
 
       // IRページに戻る
@@ -1211,8 +1422,10 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
       results.items.hasEnglish.value = 1;
       results.items.hasEnglish.hitUrl = results.actualUrl;
       console.log(`  ✓ 英語版サイト: 検出（URL取得失敗）`);
+      setItemNote(results.items.hasEnglish, 'IR英語版サイト: 検出（URL取得失敗）');
     } else {
       console.log(`  ✗ 英語版サイト: 未検出`);
+      setItemNote(results.items.hasEnglish, 'IR英語版サイト: 未検出');
     }
 
     // ステップ6: リンク先を確認（項目3-7）
@@ -1220,43 +1433,60 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
     // モード判定: primaryモードの場合は項目3-8をスキップ
     if (mode === 'primary') {
       console.log(`  一次予選モード: 項目3-8をスキップ`);
+      setItemNote(results.items.hasTopMessage, '社長メッセージ: 未調査（一次予選モード）');
+      setItemNote(results.items.hasProfile, '社長の経歴: 未調査（一次予選モード）');
+      setItemNote(results.items.hasIntegratedReport, '統合報告書: 未調査（一次予選モード）');
+      setItemNote(results.items.hasFinancialGraph, '財務情報グラフ: 未調査（一次予選モード）');
+      setItemNote(results.items.hasShareholderBenefit, '株主還元・優待: 未調査（一次予選モード）');
+      setItemNote(results.items.hasSustainabilityMenu, 'サステナビリティメニュー: 未調査（一次予選モード）');
       return results;
     }
 
     // 3. 社長メッセージ
     if (autoDetect.links.topMessage) {
       console.log(`  社長メッセージ確認中...`);
-      // キーワード設定を使用した内容確認関数を動的に生成
-      const topMessageKeywords = keywords.topMessage.contentKeywords;
-      const minLength = keywords.topMessage.minContentLength;
+      const topMessageKeywords = Array.isArray(keywords.topMessage.contentKeywords)
+        ? keywords.topMessage.contentKeywords
+        : [];
 
-      const messageCheck = await checkLinkDestination(
-        page,
-        autoDetect.links.topMessage,
-        (ctx) => {
-          const text = document.body.textContent || '';
-          const keywordsToCheck = Array.isArray(ctx.contentKeywords) ? ctx.contentKeywords : [];
-          const minLen = Number(ctx.minLength || 0);
-          return text.length > minLen && keywordsToCheck.some((keyword) => text.includes(keyword));
-        },
-        {
-          context: {
-            contentKeywords: topMessageKeywords,
-            minLength,
-          },
-        },
-      );
-      if (messageCheck.exists && !messageCheck.is404) {
-        results.items.hasTopMessage.value = 1;
-        results.items.hasTopMessage.hitUrl = messageCheck.url;
-        console.log(`  ✓ 社長メッセージ: 有`);
-      } else if (messageCheck.is404) {
-        console.log(`  ✗ 社長メッセージ: 404エラー`);
+      const messageCheck = await checkLinkDestination(page, autoDetect.links.topMessage, () => true);
+      if (!messageCheck.is404) {
+        const messageText = await page.evaluate(() => document.body.innerText || '');
+        const evaluation = evaluateTopMessage(messageText, {
+          keywords: topMessageKeywords,
+          thresholdDate: previousYearThreshold,
+          today: runStartedAt,
+        });
+
+        if (evaluation.isValid) {
+          results.items.hasTopMessage.value = 1;
+          results.items.hasTopMessage.hitUrl = messageCheck.url;
+          const formattedDate = evaluation.recentDate ? formatDateForLog(evaluation.recentDate) : '';
+          if (formattedDate) {
+            console.log(`  ✓ 社長メッセージ: 有（日付 ${formattedDate}）`);
+            setItemNote(
+              results.items.hasTopMessage,
+              `社長メッセージ: 有（日付 ${formattedDate}）`,
+            );
+          } else {
+            console.log(`  ✓ 社長メッセージ: 有`);
+            setItemNote(results.items.hasTopMessage, '社長メッセージ: 有');
+          }
+          logHitUrl('社長メッセージ', messageCheck.url);
+        } else if (!evaluation.hasKeyword) {
+          console.log(`  ✗ 社長メッセージ: キーワード未検出`);
+          setItemNote(results.items.hasTopMessage, '社長メッセージ: キーワード未検出');
+        } else {
+          console.log(`  ✗ 社長メッセージ: 日付要件未達`);
+          setItemNote(results.items.hasTopMessage, '社長メッセージ: 日付要件未達');
+        }
       } else {
-        console.log(`  ✗ 社長メッセージ: 内容なし`);
+        console.log(`  ✗ 社長メッセージ: 404エラー`);
+        setItemNote(results.items.hasTopMessage, '社長メッセージ: 404エラー');
       }
     } else {
       console.log(`  ✗ 社長メッセージ: リンク未検出`);
+      setItemNote(results.items.hasTopMessage, '社長メッセージ: リンク未検出');
     }
 
     // 4. 社長の経歴
@@ -1269,26 +1499,16 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
           const text = document.body.textContent || '';
           const careerKeywords = Array.isArray(ctx.careerKeywords) ? ctx.careerKeywords : [];
           const ceoKeywords = Array.isArray(ctx.ceoKeywords) ? ctx.ceoKeywords : [];
-          const yearPatterns = Array.isArray(ctx.yearPatterns) ? ctx.yearPatterns : [];
 
           const hasCareerKeyword = careerKeywords.some((keyword) => text.includes(keyword));
           const hasCEOInfo = ceoKeywords.some((keyword) => text.includes(keyword));
-          const hasYearInfo = yearPatterns.some((pattern) => {
-            try {
-              const regex = new RegExp(pattern, 'i');
-              return regex.test(text);
-            } catch (error) {
-              return text.includes(pattern);
-            }
-          });
 
-          return hasCareerKeyword || (hasCEOInfo && hasYearInfo);
+          return hasCareerKeyword || hasCEOInfo;
         },
         {
           context: {
             careerKeywords: keywords.profile.careerKeywords,
             ceoKeywords: keywords.profile.ceoKeywords,
-            yearPatterns: keywords.profile.yearPatterns,
           },
         },
       );
@@ -1296,147 +1516,189 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
         results.items.hasProfile.value = 1;
         results.items.hasProfile.hitUrl = profileCheck.url;
         console.log(`  ✓ 社長経歴: 有`);
+        setItemNote(results.items.hasProfile, '社長の経歴: 有');
+        logHitUrl('社長の経歴', profileCheck.url);
       } else if (profileCheck.is404) {
         console.log(`  ✗ 社長経歴: 404エラー`);
+        setItemNote(results.items.hasProfile, '社長の経歴: 404エラー');
       } else {
         console.log(`  ✗ 社長経歴: 内容なし`);
+        setItemNote(results.items.hasProfile, '社長の経歴: 内容なし');
       }
     } else {
       console.log(`  ✗ 社長経歴: リンク未検出`);
+      setItemNote(results.items.hasProfile, '社長の経歴: リンク未検出');
     }
 
     // 5. 統合報告書
     if (autoDetect.links.library) {
       console.log(`  統合報告書確認中...`);
-      const reportCheck = await checkLinkDestination(
-        page,
-        autoDetect.links.library,
-        (ctx) => {
-          const text = document.body.textContent || '';
-          const textKeywords = Array.isArray(ctx.textPatterns) ? ctx.textPatterns : [];
-          const reportKeywords = Array.isArray(ctx.reportKeywords) ? ctx.reportKeywords : [];
-          const pdfIndicators = Array.isArray(ctx.pdfIndicators) ? ctx.pdfIndicators : [];
+      const reportCheck = await checkLinkDestination(page, autoDetect.links.library, () => true);
+      if (!reportCheck.is404) {
+        const reportAnchors = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('a')).map((a) => ({
+            href: a.href,
+            text: (a.textContent || '').trim(),
+          }));
+        });
 
-          const hasReportKeyword = [...textKeywords, ...reportKeywords].some((keyword) =>
-            text.includes(keyword),
+        const reportKeywords = [
+          ...(Array.isArray(keywords.integratedReport.textPatterns)
+            ? keywords.integratedReport.textPatterns
+            : []),
+          ...(Array.isArray(keywords.integratedReport.reportKeywords)
+            ? keywords.integratedReport.reportKeywords
+            : []),
+        ];
+        const pdfIndicators = Array.isArray(keywords.integratedReport.pdfIndicators)
+          ? keywords.integratedReport.pdfIndicators
+          : [];
+
+        const selectedReport = selectIntegratedReportLink(reportAnchors, {
+          minYear: integratedReportMinYear,
+          keywords: reportKeywords,
+          pdfIndicators,
+        });
+
+        if (selectedReport) {
+          results.items.hasIntegratedReport.value = 1;
+          results.items.hasIntegratedReport.hitUrl = selectedReport.href;
+          console.log(
+            `  ✓ 統合報告書: 有（${selectedReport.latestYear}年度相当）`,
           );
-
-          const hasPdfLink = Array.from(document.querySelectorAll('a')).some((a) => {
-            const linkText = a.textContent || '';
-            const href = a.href || '';
-            const matchesKeyword = [...textKeywords, ...reportKeywords].some((keyword) =>
-              linkText.includes(keyword),
-            );
-            const matchesPdf = pdfIndicators.some(
-              (indicator) => linkText.includes(indicator) || href.includes(indicator),
-            );
-            return matchesKeyword && matchesPdf;
-          });
-
-          return hasReportKeyword || hasPdfLink;
-        },
-        {
-          context: {
-            textPatterns: keywords.integratedReport.textPatterns,
-            reportKeywords: keywords.integratedReport.reportKeywords,
-            pdfIndicators: keywords.integratedReport.pdfIndicators,
-          },
-        },
-      );
-      if (reportCheck.exists && !reportCheck.is404) {
-        results.items.hasIntegratedReport.value = 1;
-        results.items.hasIntegratedReport.hitUrl = reportCheck.url;
-        console.log(`  ✓ 統合報告書: 有`);
-      } else if (reportCheck.is404) {
-        console.log(`  ✗ 統合報告書: 404エラー`);
+          setItemNote(
+            results.items.hasIntegratedReport,
+            `統合報告書: 有（${selectedReport.latestYear}年度相当）`,
+          );
+          logHitUrl('統合報告書', selectedReport.href);
+        } else {
+          console.log(`  ✗ 統合報告書: 2023年度以降のPDF未検出`);
+          setItemNote(
+            results.items.hasIntegratedReport,
+            '統合報告書: 2023年度以降のPDF未検出',
+          );
+        }
       } else {
-        console.log(`  ✗ 統合報告書: 内容なし`);
+        console.log(`  ✗ 統合報告書: 404エラー`);
+        setItemNote(results.items.hasIntegratedReport, '統合報告書: 404エラー');
       }
     } else {
       console.log(`  ✗ 統合報告書: リンク未検出`);
+      setItemNote(results.items.hasIntegratedReport, '統合報告書: リンク未検出');
     }
 
     // 6. 財務グラフ
     if (autoDetect.links.financial) {
       console.log(`  財務グラフ確認中...`);
-      const graphCheck = await checkLinkDestination(
-        page,
-        autoDetect.links.financial,
-        (ctx) => {
-          // グラフ要素の存在を確認
+      const graphCheck = await checkLinkDestination(page, autoDetect.links.financial, () => true);
+      if (!graphCheck.is404) {
+        const graphDetails = await page.evaluate((ctx) => {
           const selectors = Array.isArray(ctx.selectors) ? ctx.selectors : [];
-          const hasVisualElement = selectors.some((selector) => document.querySelector(selector));
-
-          // グラフに関するテキスト
-          const text = document.body.textContent || '';
-          const textPatterns = Array.isArray(ctx.textPatterns) ? ctx.textPatterns : [];
-          const hasGraphText = textPatterns.some((pattern) => {
-            try {
-              const regex = new RegExp(pattern, 'i');
-              return regex.test(text);
-            } catch (error) {
-              return text.includes(pattern);
-            }
-          });
-
-          // グラフ画像
           const imageKeywords = Array.isArray(ctx.imageAltKeywords) ? ctx.imageAltKeywords : [];
+
+          const hasCanvasOrSvg = selectors.some((selector) => document.querySelector(selector));
+          const hasChartElement =
+            document.querySelector(
+              '[class*=\"chart\"], [class*=\"graph\"], [data-chart], [data-highcharts-chart]',
+            ) !== null;
+
+          const lowerKeywords = imageKeywords.map((keyword) => keyword.toLowerCase());
           const hasGraphImage = Array.from(document.querySelectorAll('img')).some((img) => {
             const alt = (img.alt || '').toLowerCase();
-            return imageKeywords.some((keyword) => alt.includes(keyword.toLowerCase()));
+            const src = (img.src || '').toLowerCase();
+            return lowerKeywords.some((keyword) => alt.includes(keyword) || src.includes(keyword));
           });
 
-          return hasVisualElement || hasGraphText || hasGraphImage;
-        },
-        {
-          context: {
-            selectors: keywords.graph.selectors,
-            textPatterns: keywords.graph.textPatterns,
-            imageAltKeywords: keywords.graph.imageAltKeywords,
-          },
-        },
-      );
-      if (graphCheck.exists && !graphCheck.is404) {
-        results.items.hasFinancialGraph.value = 1;
-        results.items.hasFinancialGraph.hitUrl = graphCheck.url;
-        console.log(`  ✓ 財務グラフ: 有`);
-      } else if (graphCheck.is404) {
-        console.log(`  ✗ 財務グラフ: 404エラー`);
+          const text = document.body.innerText || '';
+
+          return {
+            hasVisual: Boolean(hasCanvasOrSvg || hasChartElement || hasGraphImage),
+            text,
+          };
+        }, {
+          selectors: keywords.graph.selectors,
+          imageAltKeywords: keywords.graph.imageAltKeywords,
+        });
+
+        const hasVisual = Boolean(graphDetails && graphDetails.hasVisual);
+        const financialEvaluation = evaluateFinancialText(graphDetails ? graphDetails.text : '', {
+          minYear: financialDataMinYear,
+        });
+
+        if (hasVisual && financialEvaluation.hasRecentYear) {
+          results.items.hasFinancialGraph.value = 1;
+          results.items.hasFinancialGraph.hitUrl = graphCheck.url;
+          const yearLabel = financialEvaluation.latestYear
+            ? `${financialEvaluation.latestYear}年度データ確認`
+            : '最新年度データ確認';
+          console.log(`  ✓ 財務グラフ: 有（${yearLabel}）`);
+          setItemNote(
+            results.items.hasFinancialGraph,
+            `財務情報グラフ: 有（${yearLabel}）`,
+          );
+          logHitUrl('財務情報グラフ', graphCheck.url);
+        } else if (!hasVisual) {
+          console.log(`  ✗ 財務グラフ: グラフ要素未検出`);
+          setItemNote(results.items.hasFinancialGraph, '財務情報グラフ: グラフ要素未検出');
+        } else {
+          console.log(`  ✗ 財務グラフ: 最新年度データ未検出`);
+          setItemNote(results.items.hasFinancialGraph, '財務情報グラフ: 最新年度データ未検出');
+        }
       } else {
-        console.log(`  ✗ 財務グラフ: 内容なし`);
+        console.log(`  ✗ 財務グラフ: 404エラー`);
+        setItemNote(results.items.hasFinancialGraph, '財務情報グラフ: 404エラー');
       }
     } else {
       console.log(`  ✗ 財務グラフ: リンク未検出`);
+      setItemNote(results.items.hasFinancialGraph, '財務情報グラフ: リンク未検出');
     }
 
     // 7. 株主還元・優待
     if (autoDetect.links.stock) {
       console.log(`  株主還元・優待確認中...`);
-      const stockCheck = await checkLinkDestination(
-        page,
-        autoDetect.links.stock,
-        (ctx) => {
-          const text = document.body.textContent || '';
-          const contentKeywords = Array.isArray(ctx.contentKeywords) ? ctx.contentKeywords : [];
-          return contentKeywords.some((keyword) => text.includes(keyword));
-        },
-        {
-          context: {
-            contentKeywords: keywords.stock.contentKeywords,
-          },
-        },
-      );
-      if (stockCheck.exists && !stockCheck.is404) {
-        results.items.hasShareholderBenefit.value = 1;
-        results.items.hasShareholderBenefit.hitUrl = stockCheck.url;
-        console.log(`  ✓ 株主還元・優待: 有`);
-      } else if (stockCheck.is404) {
-        console.log(`  ✗ 株主還元・優待: 404エラー`);
+      const stockCheck = await checkLinkDestination(page, autoDetect.links.stock, () => true);
+      if (!stockCheck.is404) {
+        const stockText = await page.evaluate(() => document.body.innerText || '');
+        const shareholderEvaluation = evaluateShareholderContent(stockText, {
+          primaryKeywords: Array.isArray(keywords.stock.primaryContentKeywords)
+            ? keywords.stock.primaryContentKeywords
+            : [],
+          minimumTextLength:
+            typeof keywords.stock.contentMinimumLength === 'number'
+              ? keywords.stock.contentMinimumLength
+              : 15,
+        });
+
+        if (shareholderEvaluation.isValid) {
+          results.items.hasShareholderBenefit.value = 1;
+          results.items.hasShareholderBenefit.hitUrl = stockCheck.url;
+          if (shareholderEvaluation.matchedKeyword) {
+            console.log(
+              `  ✓ 株主還元・優待: 有（${shareholderEvaluation.matchedKeyword}）`,
+            );
+            setItemNote(
+              results.items.hasShareholderBenefit,
+              `株主還元・優待: 有（${shareholderEvaluation.matchedKeyword}）`,
+            );
+          } else {
+            console.log(`  ✓ 株主還元・優待: 有`);
+            setItemNote(results.items.hasShareholderBenefit, '株主還元・優待: 有');
+          }
+          logHitUrl('株主還元・優待', stockCheck.url);
+        } else {
+          console.log(`  ✗ 株主還元・優待: HTMLコンテンツ不足またはキーワード未検出`);
+          setItemNote(
+            results.items.hasShareholderBenefit,
+            '株主還元・優待: HTMLコンテンツ不足またはキーワード未検出',
+          );
+        }
       } else {
-        console.log(`  ✗ 株主還元・優待: 内容なし`);
+        console.log(`  ✗ 株主還元・優待: 404エラー`);
+        setItemNote(results.items.hasShareholderBenefit, '株主還元・優待: 404エラー');
       }
     } else {
       console.log(`  ✗ 株主還元・優待: リンク未検出`);
+      setItemNote(results.items.hasShareholderBenefit, '株主還元・優待: リンク未検出');
     }
 
     // 次の調査のため、念のため元のIRページに戻る
@@ -1450,6 +1712,11 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
   } catch (error) {
     console.error(`  エラー: ${error.message}`);
     results.error = error.message;
+    Object.values(results.items || {}).forEach((item) => {
+      if (item && !item.note) {
+        setItemNote(item, `調査エラー: ${error.message}`);
+      }
+    });
   }
 
   return results;
@@ -1459,7 +1726,7 @@ async function investigateIRSite(page, url, waitTime, keywords, mode = 'full') {
  * CSV出力
  */
 function generateCsv(allResults) {
-  let csv = '対象URL,調査項目,Value,ヒットしたURL,検出セレクタ,検出要素タイプ\n';
+  let csv = '対象URL,調査項目,Value,ヒットしたURL,検出セレクタ,検出要素タイプ,備考\n';
 
   allResults.forEach((result) => {
     const items = [
@@ -1482,7 +1749,8 @@ function generateCsv(allResults) {
     items.forEach((item) => {
       const detectedSelector = item.data.detectedSelector || '';
       const detectedElementType = item.data.detectedElementType || '';
-      csv += `${result.url},${item.name},${item.data.value},${item.data.hitUrl},${detectedSelector},${detectedElementType}\n`;
+      const note = escapeCsv(item.data.note || '');
+      csv += `${result.url},${item.name},${item.data.value},${item.data.hitUrl},${detectedSelector},${detectedElementType},${note}\n`;
     });
   });
 
@@ -1590,133 +1858,106 @@ async function runSurvey(rawOptions) {
     return { options, results: [], urlEntries, summary: null };
   }
 
-  const browserLaunchOptions = {
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-  };
-
-  if (process.platform === 'darwin') {
-    browserLaunchOptions.executablePath =
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-  }
-
-  const browser = await puppeteer.launch(browserLaunchOptions);
-
-  let page = await browser.newPage();
-  await page.setUserAgent(
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  );
-
   const allResults = [];
   let consecutiveErrors = 0;
+  let browser;
+  let page;
+  let encounteredError = null;
+  let summary = null;
 
-  for (let i = 0; i < urls.length; i++) {
-    const url = urls[i];
-    const entry = urlEntries[i] || { url, name: '', code: '' };
+  try {
+    const browserLaunchOptions = {
+      headless: 'new',
+      protocolTimeout: DEFAULT_PROTOCOL_TIMEOUT,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    };
+
+    if (process.platform === 'darwin') {
+      browserLaunchOptions.executablePath =
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    }
+
+    browser = await puppeteer.launch(browserLaunchOptions);
+
+    page = await browser.newPage();
+    await page.setUserAgent(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    );
+
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
+      const entry = urlEntries[i] || { url, name: '', code: '' };
+
+      try {
+        const result = await investigateIRSite(page, url, options.wait, keywords, options.mode);
+        result.metadata = entry;
+        allResults.push(result);
+        consecutiveErrors = 0;
+
+        console.log(`\n進捗: ${i + 1}/${urls.length} 完了`);
+
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      } catch (error) {
+        console.error(`致命的エラー: ${url} - ${error.message}`);
+        consecutiveErrors++;
+
+        if (consecutiveErrors >= 3 && browser) {
+          console.log('  ページを再作成します...');
+          try {
+            await page.close();
+          } catch (closeError) {
+            console.error(`  ページクローズ失敗: ${closeError.message}`);
+          }
+          try {
+            page = await browser.newPage();
+            await page.setUserAgent(
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            );
+            consecutiveErrors = 0;
+          } catch (newPageError) {
+            console.error(`  新規ページ作成失敗: ${newPageError.message}`);
+            encounteredError = encounteredError || newPageError;
+            break;
+          }
+        }
+
+        const errorResult = {
+          url,
+          actualUrl: '',
+          items: createDefaultItems(),
+          error: error.message,
+          metadata: entry,
+        };
+        Object.values(errorResult.items).forEach((item) =>
+          setItemNote(item, `調査エラー: ${error.message}`),
+        );
+        allResults.push(errorResult);
+      }
+    }
+  } catch (error) {
+    encounteredError = encounteredError || error;
+    console.error(`\n⚠️ 調査処理中にエラーが発生しました: ${error.message}`);
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error(`ブラウザ終了時のエラー: ${closeError.message}`);
+        encounteredError = encounteredError || closeError;
+      }
+    }
 
     try {
-      const result = await investigateIRSite(page, url, options.wait, keywords, options.mode);
-      result.metadata = entry;
-      allResults.push(result);
-      consecutiveErrors = 0;
-
-      console.log(`\n進捗: ${i + 1}/${urls.length} 完了`);
-
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    } catch (error) {
-      console.error(`致命的エラー: ${url} - ${error.message}`);
-      consecutiveErrors++;
-
-      if (consecutiveErrors >= 3) {
-        console.log('  ページを再作成します...');
-        await page.close();
-        page = await browser.newPage();
-        await page.setUserAgent(
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        );
-        consecutiveErrors = 0;
-      }
-
-      allResults.push({
-        url,
-        actualUrl: '',
-        items: {
-          hasSearch: { value: 0, hitUrl: '' },
-          hasEnglish: { value: 0, hitUrl: '' },
-          hasTopMessage: { value: 0, hitUrl: '' },
-          hasProfile: { value: 0, hitUrl: '' },
-          hasIntegratedReport: { value: 0, hitUrl: '' },
-          hasFinancialGraph: { value: 0, hitUrl: '' },
-          hasShareholderBenefit: { value: 0, hitUrl: '' },
-          hasSustainabilityMenu: { value: 0, hitUrl: '' },
-        },
-        error: error.message,
-        metadata: entry,
-      });
+      summary = writeSurveyOutputs(options, allResults, urlEntries, encounteredError);
+    } catch (writeError) {
+      console.error(`CSV出力中のエラー: ${writeError.message}`);
+      encounteredError = encounteredError || writeError;
     }
   }
 
-  await browser.close();
-
-  ensureParentDirectory(options.output);
-
-  if (options.outputStyle === 'compact') {
-    const csv = generateCompactCsv(allResults, urlEntries);
-    fs.writeFileSync(options.output, csv, 'utf8');
-  } else {
-    const csv = generateCsv(allResults);
-    fs.writeFileSync(options.output, csv, 'utf8');
-  }
-
-  console.log('\n' + '='.repeat(60));
-  console.log('調査完了');
-  console.log('='.repeat(60));
-  console.log(`出力ファイル: ${toDisplayPath(options.output)}`);
-  console.log(`調査件数: ${allResults.length}件`);
-
-  const summary = {
-    hasSearch: allResults.filter((r) => r.items.hasSearch.value === 1).length,
-    hasEnglish: allResults.filter((r) => r.items.hasEnglish.value === 1).length,
-    hasTopMessage: allResults.filter((r) => r.items.hasTopMessage.value === 1).length,
-    hasProfile: allResults.filter((r) => r.items.hasProfile.value === 1).length,
-    hasIntegratedReport: allResults.filter((r) => r.items.hasIntegratedReport.value === 1).length,
-    hasFinancialGraph: allResults.filter((r) => r.items.hasFinancialGraph.value === 1).length,
-    hasShareholderBenefit: allResults.filter((r) => r.items.hasShareholderBenefit.value === 1)
-      .length,
-    hasSustainabilityMenu: allResults.filter((r) => r.items.hasSustainabilityMenu.value === 1)
-      .length,
-  };
-
-  console.log('\n検出サマリー:');
-  console.log(
-    `  サイト内検索: ${summary.hasSearch}/${allResults.length} (${((summary.hasSearch / allResults.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(
-    `  英語版サイト: ${summary.hasEnglish}/${allResults.length} (${((summary.hasEnglish / allResults.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(
-    `  社長メッセージ: ${summary.hasTopMessage}/${allResults.length} (${((summary.hasTopMessage / allResults.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(
-    `  社長の経歴: ${summary.hasProfile}/${allResults.length} (${((summary.hasProfile / allResults.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(
-    `  統合報告書: ${summary.hasIntegratedReport}/${allResults.length} (${((summary.hasIntegratedReport / allResults.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(
-    `  財務グラフ: ${summary.hasFinancialGraph}/${allResults.length} (${((summary.hasFinancialGraph / allResults.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(
-    `  株主還元・優待: ${summary.hasShareholderBenefit}/${allResults.length} (${((summary.hasShareholderBenefit / allResults.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(
-    `  サステナビリティ: ${summary.hasSustainabilityMenu}/${allResults.length} (${((summary.hasSustainabilityMenu / allResults.length) * 100).toFixed(1)}%)`,
-  );
-  console.log('='.repeat(60));
-
-  const errorCount = allResults.filter((r) => r.error).length;
-  if (errorCount > 0) {
-    console.log(`\n⚠️ エラー件数: ${errorCount}件`);
+  if (encounteredError) {
+    console.log(`⚠️ 未処理エラー: ${encounteredError.message}`);
+    throw encounteredError;
   }
 
   return { options, results: allResults, urlEntries, summary };

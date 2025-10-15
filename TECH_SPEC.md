@@ -15,6 +15,19 @@ v5.1 以降は `src/index.js` をエントリーポイントとし、モード�
 
 ---
 
+## 共通バリデーションユーティリティ
+
+v5.2 では仕様依存の判定を `src/lib/spec-validators.js` に集約し、各項目が同一ロジックを共有できるようにした。
+
+- `evaluateTopMessage()`：本文からキーワード・年月日を抽出し、前年1月以降の月付き日付を検証。元号→西暦変換や英語表記もサポート。
+- `selectIntegratedReportLink()`：PDFリンク候補をフィルタし、2023年度以降の最新レポートを選択。
+- `evaluateFinancialText()`：本文中の年度（西暦/FY/元号）を解析し、最新年が当年または前年かを判定。
+- `evaluateShareholderContent()`：株主還元系キーワードの存在と本文長を評価し、数値のみのページを除外。
+
+これらの関数は `investigateIRSite()` から呼び出され、ログやCSVに必要な付加情報（検出年度、使用キーワードなど）を付与する。
+
+---
+
 ## サイト内検索機能の検出仕様
 
 ### 共通仕様（v4.1 / v5.0）
@@ -534,10 +547,13 @@ node src/index.js --mode primary --file urls_test.txt --output result.csv --wait
 ### 出力ファイル形式
 
 ```csv
-対象URL,調査項目,Value,ヒットしたURL,検出セレクタ,検出要素タイプ
-https://example.com/ir/,サイト内検索がある,1,https://example.com/ir/,input[type="search"],search-element
-https://example.com/ir/,IR英語版サイトがある,1,https://example.com/en/,a[href*="/en/"],search-element
+対象URL,調査項目,Value,ヒットしたURL,検出セレクタ,検出要素タイプ,備考
+https://example.com/ir/,サイト内検索がある,1,https://example.com/ir/,input[type="search"],search-element,サイト内検索: 検出
+https://example.com/ir/,IR英語版サイトがある,1,https://example.com/en/,a[href*="/en/"],search-element,IR英語版サイト: 有（https://example.com/en/）
 ```
+
+- `備考` にはログ出力と同じ判定メッセージが入る（例: `社長メッセージ: 有（日付 2025-04-01）`）。  
+- 各項目の成功/失敗理由やスキップ理由をCSVだけで追跡できる。
 
 ---
 
@@ -568,17 +584,25 @@ URLパターン: -href.includes('message') - href.includes('greeting') - href.in
 #### 内容確認ロジック
 
 ```javascript
-// メッセージ本文が存在するか
-document.body.textContent.length > 500 &&
-  (text.includes('社長') ||
-    text.includes('代表') ||
-    text.includes('株主の皆様') ||
-    text.includes('投資家の皆様'));
+const result = evaluateTopMessage(document.body.innerText, {
+  keywords: ['社長', '代表', '株主の皆様', '投資家の皆様', ...],
+  thresholdDate: new Date(currentYear - 1, 0, 1), // 前年1月1日
+  today: runStartedAt, // 実行日時
+});
+
+// 判定条件
+result.hasKeyword && result.recentDate !== null
 ```
 
-#### 検出精度
+- 日本語元号（令和 / 平成 / 昭和）→西暦変換をサポート
+- 年月表記のみでも許容（日付は任意）だが、月が無い年表記のみは未達扱い
+- しきい値は「前年1月1日以降」までの最新日付
+- 本文の文字数によるフィルタは廃止し、キーワード + 日付要件のみで判定
+- 実行日は `runStartedAt` に依存し、年が変わっても自動でしきい値を更新
 
-**実測値**: 約88.9%（9社中8社で検出）
+#### 検出補足
+
+最新日付が検出された場合はログに `YYYY-MM-DD` 形式で記録。
 
 ---
 
@@ -602,22 +626,15 @@ URLパターン: -href.includes('officer') - href.includes('board') - href.inclu
 #### 内容確認ロジック
 
 ```javascript
-// 経歴キーワードまたは年号情報
-text.includes('経歴') ||
-  text.includes('略歴') ||
-  text.includes('学歴') ||
-  text.includes('職歴') ||
-  (text.includes('代表取締役') && text.match(/昭和|平成|令和|19\d\d年|20\d\d年/));
+const hasCareerKeyword = ['経歴', '略歴', '学歴', '職歴'].some((kw) => text.includes(kw));
+const hasOfficerKeyword = ['代表取締役', '社長'].some((kw) => text.includes(kw));
+
+return hasCareerKeyword || hasOfficerKeyword;
 ```
 
-#### 検出精度
-
-**実測値**: 約44.4%（9社中4社で検出）
-
-**未検出の主な理由**:
-
-- 経歴情報を公開していない企業が多い
-- 名前と役職のみの掲載
+- 年号や学歴の有無は問わない（仕様の「内容は問わない」を優先）
+- 氏名＋肩書のみでも代表表記があれば達成
+- モーダル・別ページ展開でも `textContent` を集計して判定
 
 ---
 
@@ -640,28 +657,24 @@ URLパターン: -href.includes('library') - href.includes('integrated');
 
 #### 内容確認ロジック
 
+1. `selectIntegratedReportLink()` でリンク候補を収集  
+2. テキスト/URLの両方にキーワード（統合報告書 / Integrated Report など）が含まれるか確認  
+3. `.pdf` または `PDF` 指標を含むリンクのみ採用  
+4. リンクテキスト・URLから年度（西暦/元号/FY）を抽出し、**2023年度以上**のものを優先的に選択
+
 ```javascript
-// 統合報告書のキーワード
-text.includes('統合報告書') ||
-  text.includes('Integrated Report') ||
-  text.includes('アニュアルレポート') ||
-  text.includes('Annual Report') ||
-  // PDFリンクの存在
-  Array.from(document.querySelectorAll('a')).some(
-    (a) =>
-      (a.textContent.includes('統合報告書') || a.textContent.includes('Integrated')) &&
-      (a.href.includes('.pdf') || a.textContent.includes('PDF')),
-  );
+const candidate = selectIntegratedReportLink(anchors, {
+  minYear: 2023,
+  keywords: [...統合報告書関連キーワード...],
+  pdfIndicators: ['.pdf', 'pdf'],
+});
+
+return candidate !== null;
 ```
 
-#### 検出精度
-
-**実測値**: 約33.3%（9社中3社で検出）
-
-**未検出の主な理由**:
-
-- 統合報告書を発行していない企業が多い
-- 「事業報告書」のみ掲載
+- 2022年度以前のPDFのみの場合は未達扱い
+- 複数候補がある場合は最新年度のリンクを採用し、CSVにはそのURLを記録
+- `minYear` は当面 2023 固定。新年度が要件に追加された場合はここを更新する
 
 ---
 
@@ -687,25 +700,26 @@ URLパターン: -href.includes('highlight') -
 #### 内容確認ロジック
 
 ```javascript
-// canvas/svg要素
-document.querySelector('canvas') ||
-  document.querySelector('svg') ||
-  // グラフテキスト
-  text.match(/売上高.*百万円|営業利益.*百万円|当期純利益.*百万円/) ||
-  // グラフ画像
-  Array.from(document.querySelectorAll('img')).some(
-    (img) => img.alt && (img.alt.includes('グラフ') || img.alt.includes('推移')),
-  );
+const hasVisual =
+  document.querySelector('canvas, svg') ||
+  document.querySelector('[class*="chart"], [class*="graph"], [data-chart], [data-highcharts-chart]') ||
+  Array.from(document.querySelectorAll('img')).some((img) => {
+    const alt = (img.alt || '').toLowerCase();
+    const src = (img.src || '').toLowerCase();
+    return ['グラフ', '推移', 'chart'].some((kw) => alt.includes(kw) || src.includes(kw));
+  });
+
+const { hasRecentYear } = evaluateFinancialText(document.body.innerText, {
+  minYear: currentYear - 1,
+});
+
+return hasVisual && hasRecentYear;
 ```
 
-#### 検出精度
-
-**実測値**: 約44.4%（9社中4社で検出）
-
-**未検出の主な理由**:
-
-- 表形式のみでグラフがない
-- グラフがJavaScriptで遅延ロード
+- グラフ要素（canvas/svg/チャート系クラス/altで推移を示す画像）の存在が必須
+- 年度判定は本文テキストから抽出した西暦・FY・元号を解析し、**当年または前年のデータ**が含まれること
+- 表のみの場合、または古い年度のみの場合は未達扱い
+- `minYear` は実行日時の前年で動的に算出されるため、年度更新に追従可能
 
 ---
 
@@ -731,18 +745,30 @@ URLパターン: -href.includes('stock') -
 
 #### 内容確認ロジック
 
+1. リンク抽出時点で `.pdf` を含むURLは除外（HTMLページのみ対象）
+2. 遷移後の本文テキストを `evaluateShareholderContent()` に入力
+
 ```javascript
-text.includes('株主還元') ||
-  text.includes('配当') ||
-  text.includes('株主優待') ||
-  text.includes('Dividend') ||
-  text.includes('還元方針') ||
-  text.includes('優待制度');
+const result = evaluateShareholderContent(document.body.innerText, {
+  primaryKeywords: [
+    '株主還元',
+    '株主還元方針',
+    '株主優待',
+    '配当政策',
+    'shareholder return',
+    'dividend policy',
+    ...
+  ],
+  minimumTextLength: 20,
+});
+
+return result.isValid;
 ```
 
-#### 検出精度
-
-**実測値**: 約88.9%（9社中8社で検出）
+- 単なる数値羅列（例: 配当性向 30%）のみの場合は最小テキスト長で弾く
+- キーワードが本文に含まれている場合のみ達成
+- PDFリンクや外部サイト（Yahoo!等）はヒット対象外
+- キーワード/最小文字数は `config/keywords.json` の `stock.primaryContentKeywords` / `stock.contentMinimumLength` で管理
 
 ---
 
@@ -750,21 +776,32 @@ text.includes('株主還元') ||
 
 #### 検出原理
 
-グローバルナビゲーション（第1階層メニュー）にサステナビリティ関連のメニューが存在するかを検出
+グローバルナビゲーション（第1階層）にサステナビリティ関連メニューが存在するかを検出。
 
 #### 検出対象要素
 
 ```javascript
-セレクタ: -'header a' - 'nav a' - '.global-nav a' - '.header a' - '.gnav a';
-
-キーワード: -'サステナビリティ' - 'Sustainability' - 'ESG' - 'CSR' - 'SDGs';
+const selectors = ['header a', 'nav a', '.global-nav a', '.header a', '.gnav a'];
+const keywords = ['サステナビリティ', 'Sustainability', 'ESG', 'CSR', 'SDGs'];
 ```
 
 #### 判定基準
 
-グローバルナビゲーション内のリンクテキストに上記キーワードが含まれる場合、Value=1
+```javascript
+const link = candidates.find((a) => {
+  const text = a.textContent.trim();
+  return keywords.some((kw) => text.includes(kw)) &&
+    isVisible(a) &&
+    isTopLevelMenu(a); // UL/OL/menuを1階層以内
+});
 
-**注意**: 「企業情報」の下層ページにのみ存在する場合はValue=0
+return Boolean(link);
+```
+
+- `isVisible` で display / visibility / opacity をチェックし、表示されているリンクのみ採用
+- `isTopLevelMenu` で親要素のリスト階層を調べ、第2階層以下にある場合は除外
+- ログには検出したリンクURL（存在する場合）が記録される
+- ドロップダウン内でも、親リストが第1階層であれば達成扱い。サイドバーやフッターのみの記載は未達
 
 #### 検出精度
 
